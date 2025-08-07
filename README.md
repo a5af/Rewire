@@ -1,63 +1,125 @@
-Rewire is a Roblox library that makes adding HotReload functionality easy.
+# Rewire (v0.3.0)
 
-**What's Hot Reloading?**
+**Rewire** is a Roblox library that enables **Hot Reloading** of modules while your game is running in Studio play mode.
 
-Hot Reloading means changing the behavior of your game immediately when some code is edited. This means you can write code _while your game is running in studio play mode_ and see updates happen in realtime, without having to stop and start the running session.
+## 🔥 What is Hot Reloading?
 
-Here is an example of HotReloading used to edit Roact UI while the game is running:
-https://user-images.githubusercontent.com/6133296/161100007-9e6616f1-01ca-4d1d-9812-270fbc238433.mp4
+Hot Reloading means you can **edit code during runtime** and see the results immediately without stopping and restarting the session. This is especially powerful for UI, systems tuning, or gameplay prototyping.
 
-**How to use it?**
+> Example:  
+> [Watch Hot Reloading a Roact UI in action](https://user-images.githubusercontent.com/6133296/161100007-9e6616f1-01ca-4d1d-9812-270fbc238433.mp4)
 
-1. Create a new HotReloader object:
+---
+
+## 🚀 How to Use
+
+### 1. Create a HotReloader
 
 ```lua
-local Rewire = require(WHEREVER_REWIRE_IS)
+local Rewire = require(PATH_TO_REWIRE)
 local reloader = Rewire.HotReloader.new()
 ```
 
-2. Listen to a modulescript for which you want to support HotReloading
+### 2. Listen to a ModuleScript
 
 ```lua
+local myInstance = nil
 
-local requiredModule = nil
+reloader:listen(MODULE_TO_WATCH,
+	function(module, context)
+		print("🔁 Reloading module:", module)
 
-reloader:listen(WHICHEVER_MODULE,
-function(module:ModuleScript)
-   -- callback invoked immediately upon listening, and whenever the module in question updates
-   -- this could include requiring the module and changing a global reference
-   requiredModule = require(module)
-end,
-function(module:ModuleScript)
-   -- here you put cleanup code that needs to happen before the next invocation of the callback
-   -- this could be destroying objects that need to be destroyed, or unmounting a Roact handle
-end)
+		local ok, result = pcall(function()
+			return require(module)
+		end)
 
--- since the HotReloader doesn't yield on first invocation, requiredModule is guaranteed to be non-nil by this point
+		if not ok then
+			warn("❌ Failed to reload module:", result)
+			return
+		end
+
+		if myInstance then
+			myInstance:Destroy()
+		end
+
+		myInstance = result() -- for example, this could return a UI
+	end,
+	function(_, _)
+		print("🧹 Cleaning up before reload")
+		if myInstance then
+			myInstance:Destroy()
+			myInstance = nil
+		end
+	end
+)
 ```
 
-Rewire currently only listens to updates in Studio - on live servers, it just fires the callback once and returns.
+> **Tip:** Always use `pcall(require(...))` to guard against syntax or runtime errors in the reloaded module.
 
-**With Rojo**
-If you are using Rojo, you will have to reconnect after your start studio play/run mode. This is a limitation of Rojo that's planned to be fixed.
+---
 
-**Some additional functionality**
-As of version 0.3.0, Rewire now passes along a Context value to the callbacks. This allows callbacks to behave differently based on the types of reloading. The context parameter is structured as follows:
+## ⚙️ Rojo & Server Sync
+
+To enable hot reloading in a **Rojo + Play Solo** environment, you **must launch both a server and a client**, and Rojo must be syncing with the **server process**, not the client.
+
+### ✅ Setup Checklist:
+
+- Use `rojo serve` to sync your `default.project.json` to the server.
+- In Studio, start **Play > Start (Server + 1 Player)**.
+- Reconnect Rojo to the **server instance**.
+- Rewire will now hot-reload on the **client side** when files change.
+
+> **Note:** Rewire does **not reload modules at runtime on live servers**. Outside Studio, it just fires the callback once.
+
+---
+
+## 🧠 `Context` Parameter (New in v0.3.0)
+
+As of v0.3.0, Rewire passes a `context` object to both the reload and cleanup callbacks. You can use this to tell whether the module is reloading or running for the first time.
 
 ```lua
 type Context = {
-	originalModule: ModuleScript, -- a pointer to the original module that was listened to
-	isReloading: boolean, -- is true if the callback was invoked while the module was reloading (instead of module removed or during the first call to :listen)
+	originalModule: ModuleScript, -- the original watched module
+	isReloading: boolean,         -- true if this is a reload, false for first run
 }
 ```
 
-**How does this even work?**
+---
 
-Rewire [listens to changes on ModuleScripts](src/HotReloader.lua) to decide when to reload. Rewire then creates a clone of the ModuleScript in question - this is needed since Roblox currently caches ModuleScript sources while the game is running, so if we didn't clone then `require` wouldn't return the results of the changed code.
-For convenience, Rewire tags all created clones [with a CollectionService tag](src/Constants.lua). This tag can be accessed as follows:
+## 🛠 How It Works
+
+Rewire watches `ModuleScript` instances for changes. Because Roblox caches required modules, Rewire **clones** the module when reloading to bypass that cache.
+
+### 📛 Clone Tagging
+
+All cloned modules are tagged using `CollectionService` with a special identifier:
 
 ```lua
-Rewire.CollectionServiceTag
+Rewire.CollectionServiceTag -- e.g. "__rewire_clone"
 ```
 
-You can use this tag in upstream code to ignore Rewire created modules (e.g. in `ChildAdded` or `ChildRemoved` events)
+You can use this tag to filter Rewire clones out of your logic (e.g. in `ChildAdded` listeners).
+
+---
+
+## 🧪 Example Use Cases
+
+- Live-editing Roact or Fusion UI while playtesting
+- Real-time tweaking of gameplay logic or behaviors
+- Avoiding Studio restart cycles for every small code change
+
+---
+
+## 📌 Limitations
+
+- Rewire only works in **Studio** (not in published or live games).
+- Only ModuleScripts can be hot-reloaded.
+- Requires Rojo syncing to the **server process** for live reloading.
+
+---
+
+## ✅ Final Notes
+
+Use Rewire to dramatically speed up your iteration time while building systems, UI, and game logic. For safety and reliability, always wrap `require(...)` in a `pcall` and handle errors gracefully to avoid crashes during reloads.
+
+Happy hot-reloading!
